@@ -1,0 +1,6 @@
+streamlit
+scikit-learn
+joblib
+nltk
+requests
+langdetect

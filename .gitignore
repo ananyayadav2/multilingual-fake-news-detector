@@ -1,0 +1,12 @@
+# Large dataset files
+*.csv
+*.zip
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Local environment
+.DS_Store
+.venv/
+env/
