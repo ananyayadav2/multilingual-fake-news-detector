@@ -77,7 +77,6 @@ st.markdown("""
     .alert-error { background-color: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
     .alert-warning { background-color: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
     
-    /* Center pagination buttons nicely */
     div[data-testid="column"] button { width: 100%; }
 </style>
 """, unsafe_allow_html=True)
@@ -94,36 +93,33 @@ st.markdown("""
 with st.sidebar:
     st.header("⚡ System Specs")
     st.markdown("**Core Architecture**")
-    st.markdown("- Dual ML Pipelines (Random Forest)")
+    st.markdown("- Tri-Pipeline ML (Random Forest)")
     st.markdown("- TF-IDF Character & Word n-grams")
     st.markdown("- Real-Time Fact Retrieval Engine")
     st.divider()
     st.markdown("**Supported Languages**")
     st.markdown("🇬🇧 **English** (Global Corpus)")
     st.markdown("🇮🇳 **Hindi** (Devanagari Corpus)")
+    st.markdown("🚩 **Marathi** (Devanagari Corpus)")
     st.divider()
     st.caption("Designed for Academic Research & Live Event Verification")
 
 # Load models
 @st.cache_resource
 def load_artifacts():
-    try:
-        en_v = joblib.load('english_tfidf_vectorizer.pkl')
-        en_m = joblib.load('english_model.pkl')
-        en_met = joblib.load('english_metrics.pkl')
-        
-        hi_v = joblib.load('hindi_tfidf_vectorizer.pkl')
-        hi_m = joblib.load('hindi_model.pkl')
-        hi_met = joblib.load('hindi_metrics.pkl')
-        
-        return (en_v, en_m, en_met), (hi_v, hi_m, hi_met)
-    except Exception:
-        return None, None
+    def load_lang(prefix):
+        try:
+            return (joblib.load(f'{prefix}_tfidf_vectorizer.pkl'),
+                    joblib.load(f'{prefix}_model.pkl'),
+                    joblib.load(f'{prefix}_metrics.pkl'))
+        except Exception:
+            return None
+    return load_lang('english'), load_lang('hindi'), load_lang('marathi')
 
-en_bundle, hi_bundle = load_artifacts()
+en_bundle, hi_bundle, mr_bundle = load_artifacts()
 
 if en_bundle is None or hi_bundle is None:
-    st.error("Model artifacts missing. Please ensure all `.pkl` files reside in your workspace.")
+    st.error("Model artifacts missing. Please ensure `.pkl` files reside in your workspace.")
     st.stop()
 
 # Preprocessing routines
@@ -131,7 +127,8 @@ def preprocess_english(text):
     text = re.sub(r'[^a-zA-Z\s]', '', str(text)).lower()
     return " ".join([stemmer.stem(w) for w in text.split() if w not in stop_words_en])
 
-def preprocess_hindi(text):
+def preprocess_indic(text):
+    # Works for both Hindi and Marathi
     text = re.sub(r'[^\u0900-\u097F\s]', '', str(text))
     return " ".join(text.split())
 
@@ -140,16 +137,9 @@ def fetch_live_news(query, check_today=False):
         return None
     
     today_str = date.today().isoformat()
-    
-    # IMPROVED RELEVANCE: Search only in titles/descriptions and sort by relevancy
-    if check_today:
-        date_param = f"&from={today_str}&sortBy=publishedAt"
-    else:
-        date_param = f"&sortBy=relevancy"
-    
+    date_param = f"&from={today_str}&sortBy=publishedAt" if check_today else f"&sortBy=relevancy"
     safe_query = urllib.parse.quote(query)
     
-    # Fetch 12 articles for 4 pages of 3
     url = f"https://newsapi.org/v2/everything?q={safe_query}&searchIn=title,description{date_param}&pageSize=12&apiKey={NEWS_API_KEY}"
     try:
         res = requests.get(url, timeout=5).json()
@@ -160,18 +150,18 @@ def fetch_live_news(query, check_today=False):
     return []
 
 # Input Section
-user_input = st.text_area("Input News Headline or Claim:", height=110, placeholder="Type or paste an article statement in English or Hindi...")
+user_input = st.text_area("Input News Headline or Claim:", height=110, placeholder="Type or paste an article statement in English, Hindi, or Marathi...")
 
 col_btn, _ = st.columns([1, 4])
 with col_btn:
     analyze_btn = st.button("Run Verification", type="primary", use_container_width=True)
 
-# When the button is clicked, we run the analysis and save it to session state
 if analyze_btn:
     if not user_input.strip():
         st.warning("Please supply a text input prior to analysis.")
         st.stop()
 
+    # Language Detection
     detected_lang = "en"
     try:
         detected_lang = detect(user_input)
@@ -179,9 +169,18 @@ if analyze_btn:
         pass
 
     is_hindi = detected_lang == "hi"
+    is_marathi = detected_lang == "mr"
     
-    if is_hindi:
-        clean_text = preprocess_hindi(user_input)
+    # Routing
+    if is_marathi:
+        if mr_bundle is None:
+            st.error("🚨 Marathi model missing.")
+            st.stop()
+        clean_text = preprocess_indic(user_input)
+        vectorizer, model, metrics = mr_bundle
+        lang_display = "Marathi (Devanagari)"
+    elif is_hindi:
+        clean_text = preprocess_indic(user_input)
         vectorizer, model, metrics = hi_bundle
         lang_display = "Hindi (Devanagari)"
     else:
@@ -189,10 +188,12 @@ if analyze_btn:
         vectorizer, model, metrics = en_bundle
         lang_display = "English"
 
+    # Prediction
     transformed = vectorizer.transform([clean_text])
     raw_pred = model.predict(transformed)[0]
     probabilities = model.predict_proba(transformed)[0]
     
+    # Label Handling (Only Hindi dataset used 0=Real, Marathi and English use 1=Real)
     if is_hindi:
         pred = 1 if raw_pred == 0 else 0
         confidence = probabilities[raw_pred] * 100
@@ -200,14 +201,14 @@ if analyze_btn:
         pred = raw_pred
         confidence = probabilities[pred] * 100
 
-    # Live news filtering
+    # API Prep
     is_today_query = "today" in user_input.lower() or "आज" in user_input
     
-    # Added "recently", "recent", "news", "about" to ignore list for better strict searching
     ignore_words = {
-        "was", "is", "are", "were", "there", "today", "now", "the", "this", 
-        "that", "a", "an", "in", "on", "at", "for", "to", "of", "did", "have", "has",
-        "में", "है", "और", "की", "गई", "आज", "recently", "recent", "about", "news", "tell", "me"
+        "was", "is", "are", "were", "there", "today", "now", "the", "this", "that", "a", "an", "in", "on", "at", 
+        "for", "to", "of", "did", "have", "has", "recently", "recent", "about", "news", "tell", "me",
+        "में", "है", "और", "की", "गई", "आज",
+        "आहे", "नाही", "आणि", "व", "ते", "हे", "या"
     }
     cleaned_words = [re.sub(r'[^a-zA-Z0-9\u0900-\u097F]', '', w) for w in user_input.split()]
     meaningful_words = [w for w in cleaned_words if w.lower() not in ignore_words and len(w) > 2]
@@ -216,9 +217,9 @@ if analyze_btn:
     with st.spinner("Querying wire services..."):
         articles = fetch_live_news(search_terms, check_today=is_today_query)
 
-    # Save everything to session state so it survives pagination clicks
+    # Save to Session State
     st.session_state.analyzed = True
-    st.session_state.page = 0  # Reset to page 1
+    st.session_state.page = 0
     st.session_state.pred = pred
     st.session_state.confidence = confidence
     st.session_state.lang_display = lang_display
@@ -226,9 +227,8 @@ if analyze_btn:
     st.session_state.is_today_query = is_today_query
     st.session_state.articles = articles
 
-
 # ==========================================
-# DISPLAY RESULTS FROM SESSION STATE
+# DISPLAY RESULTS
 # ==========================================
 if st.session_state.analyzed:
     col1, col2 = st.columns(2)
@@ -254,7 +254,7 @@ if st.session_state.analyzed:
         with st.expander("Model Benchmark Metrics"):
             st.json(st.session_state.metrics)
 
-    # Panel 2: Live Fact-Checking with Pagination
+    # Panel 2: Live Fact-Checking
     with col2:
         st.markdown("""
         <div class="metric-card">
@@ -273,16 +273,12 @@ if st.session_state.analyzed:
             else:
                 st.markdown('<div class="alert-box alert-warning">⚠️ <b>No Active Coverage</b><br>No highly relevant mainstream coverage found matching this topic.</div>', unsafe_allow_html=True)
         else:
-            # PAGINATION MATH
             PAGE_SIZE = 3
             total_pages = (len(articles) - 1) // PAGE_SIZE + 1
             start_idx = st.session_state.page * PAGE_SIZE
             end_idx = start_idx + PAGE_SIZE
             
-            # Display the 3 articles for the current page
-            current_articles = articles[start_idx:end_idx]
-            
-            for art in current_articles:
+            for art in articles[start_idx:end_idx]:
                 pub_date = art.get('publishedAt', '')[:10]
                 st.markdown(f"""
                 <div class="article-card">
@@ -291,24 +287,20 @@ if st.session_state.analyzed:
                 </div>
                 """, unsafe_allow_html=True)
 
-            # PAGINATION CONTROLS
             if total_pages > 1:
                 st.markdown("<hr style='margin: 1rem 0; border: none; border-top: 1px solid #e2e8f0;'>", unsafe_allow_html=True)
                 p_col1, p_col2, p_col3 = st.columns([1, 1, 1])
-                
                 with p_col1:
-                    if st.session_state.page > 0:
-                        if st.button("⬅️ Prev"):
-                            st.session_state.page -= 1
-                            st.rerun()
+                    if st.session_state.page > 0 and st.button("⬅️ Prev"):
+                        st.session_state.page -= 1
+                        st.rerun()
                 with p_col2:
                     st.markdown(f"<div style='text-align:center; padding-top:0.4rem; color:#64748b; font-size:0.9rem;'>Page {st.session_state.page + 1} of {total_pages}</div>", unsafe_allow_html=True)
                 with p_col3:
-                    if st.session_state.page < total_pages - 1:
-                        if st.button("Next ➡️"):
-                            st.session_state.page += 1
-                            st.rerun()
-                            
+                    if st.session_state.page < total_pages - 1 and st.button("Next ➡️"):
+                        st.session_state.page += 1
+                        st.rerun()
+                        
         st.markdown("</div>", unsafe_allow_html=True)
 
     # Synthesis Verdict Banner
