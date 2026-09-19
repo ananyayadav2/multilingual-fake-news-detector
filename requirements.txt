@@ -4,3 +4,4 @@ joblib
 nltk
 requests
 langdetect
+deep-translator

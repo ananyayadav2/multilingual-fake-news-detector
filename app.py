@@ -8,6 +8,7 @@ from datetime import date
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from langdetect import detect, DetectorFactory
+from deep_translator import GoogleTranslator
 
 # Set seed for reproducible language detection
 DetectorFactory.seed = 0
@@ -105,7 +106,7 @@ with st.sidebar:
     st.caption("Designed for Academic Research & Live Event Verification")
 
 # ==========================================
-# LAZY MODEL LOADER (Fixes Memory Crash)
+# LAZY MODEL LOADER 
 # ==========================================
 @st.cache_resource
 def load_model(language):
@@ -193,7 +194,7 @@ if analyze_btn:
     raw_pred = model.predict(transformed)[0]
     probabilities = model.predict_proba(transformed)[0]
     
-    # Label Handling (Only Hindi dataset used 0=Real, Marathi and English use 1=Real)
+    # Label Handling
     if is_hindi:
         pred = 1 if raw_pred == 0 else 0
         confidence = probabilities[raw_pred] * 100
@@ -206,15 +207,25 @@ if analyze_btn:
     
     ignore_words = {
         "was", "is", "are", "were", "there", "today", "now", "the", "this", "that", "a", "an", "in", "on", "at", 
-        "for", "to", "of", "did", "have", "has", "recently", "recent", "about", "news", "tell", "me",
-        "में", "है", "और", "की", "गई", "आज",
-        "आहे", "नाही", "आणि", "व", "ते", "हे", "या"
+        "for", "to", "of", "did", "have", "has", "recently", "recent", "about", "news", "tell", "me", "what", "why", "how",
+        "में", "है", "और", "की", "गई", "आज", "का",
+        "आहे", "नाही", "आणि", "व", "ते", "हे", "या", "का"
     }
     cleaned_words = [re.sub(r'[^a-zA-Z0-9\u0900-\u097F]', '', w) for w in user_input.split()]
     meaningful_words = [w for w in cleaned_words if w.lower() not in ignore_words and len(w) > 2]
-    search_terms = " AND ".join(meaningful_words[:4]) if meaningful_words else user_input.strip()
+    
+    raw_search = " ".join(meaningful_words[:4]) if meaningful_words else user_input.strip()
+    
+    # TRANSLATION LAYER: Convert Hindi/Marathi queries to English for NewsAPI
+    search_terms = raw_search
+    if is_hindi or is_marathi:
+        try:
+            translator = GoogleTranslator(source='auto', target='en')
+            search_terms = translator.translate(raw_search)
+        except Exception:
+            pass # Fallback to original text if translation fails
 
-    with st.spinner("Querying wire services..."):
+    with st.spinner("Translating query and searching global wire services..."):
         articles = fetch_live_news(search_terms, check_today=is_today_query)
 
     # Save to Session State
@@ -226,6 +237,7 @@ if analyze_btn:
     st.session_state.metrics = metrics
     st.session_state.is_today_query = is_today_query
     st.session_state.articles = articles
+    st.session_state.translated_query = search_terms
 
 # ==========================================
 # DISPLAY RESULTS
@@ -256,10 +268,11 @@ if st.session_state.analyzed:
 
     # Panel 2: Live Fact-Checking
     with col2:
-        st.markdown("""
+        st.markdown(f"""
         <div class="metric-card">
             <h4>🌐 Live Source Retrieval</h4>
-            <span style="color:#64748b; font-size: 0.9rem;">Target: Global News Wire (Real-Time)</span>
+            <span style="color:#64748b; font-size: 0.9rem;">Target: Global News Wire (Real-Time)</span><br>
+            <span style="color:#94a3b8; font-size: 0.8rem;"><i>API Search Term: "{st.session_state.translated_query}"</i></span>
             <hr style="margin: 0.8rem 0; border: none; border-top: 1px solid #f1f5f9;">
         """, unsafe_allow_html=True)
         
