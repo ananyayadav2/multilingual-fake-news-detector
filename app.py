@@ -42,6 +42,11 @@ st.markdown("""
         font-family: 'Plus Jakarta Sans', sans-serif;
     }
     
+    /* Remove default Streamlit top padding */
+    .block-container {
+        padding-top: 2rem !important;
+    }
+    
     /* Dark Grey Hero Container */
     .hero-container {
         background: linear-gradient(135deg, #4b5563 0%, #1f2937 100%);
@@ -191,7 +196,8 @@ def fetch_live_news(query, check_today=False):
     today_str = date.today().isoformat()
     date_param = f"&from={today_str}&sortBy=publishedAt" if check_today else "&sortBy=publishedAt"
     
-    url = f"https://newsapi.org/v2/everything?q={query}{date_param}&pageSize=3&apiKey={NEWS_API_KEY}"
+    # Changed pageSize from 3 to 5
+    url = f"https://newsapi.org/v2/everything?q={query}{date_param}&pageSize=5&apiKey={NEWS_API_KEY}"
     try:
         res = requests.get(url, timeout=5).json()
         if res.get("status") == "ok":
