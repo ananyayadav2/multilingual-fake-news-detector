@@ -8,7 +8,7 @@ from datetime import date
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from langdetect import detect, DetectorFactory
-from deep_translator import GoogleTranslator
+from deep_translator import GoogleTranslator, MyMemoryTranslator
 
 # Set seed for reproducible language detection
 DetectorFactory.seed = 0
@@ -106,7 +106,7 @@ with st.sidebar:
     st.caption("Designed for Academic Research & Live Event Verification")
 
 # ==========================================
-# LAZY MODEL LOADER 
+# LAZY MODEL LOADER (Fixes Memory Crash)
 # ==========================================
 @st.cache_resource
 def load_model(language):
@@ -194,7 +194,7 @@ if analyze_btn:
     raw_pred = model.predict(transformed)[0]
     probabilities = model.predict_proba(transformed)[0]
     
-    # Label Handling
+    # Label Handling (Only Hindi dataset used 0=Real, Marathi and English use 1=Real)
     if is_hindi:
         pred = 1 if raw_pred == 0 else 0
         confidence = probabilities[raw_pred] * 100
@@ -219,11 +219,18 @@ if analyze_btn:
     # TRANSLATION LAYER: Convert Hindi/Marathi queries to English for NewsAPI
     search_terms = raw_search
     if is_hindi or is_marathi:
+        src_lang = 'mr' if is_marathi else 'hi'
         try:
-            translator = GoogleTranslator(source='auto', target='en')
+            # Attempt 1: Google Translate
+            translator = GoogleTranslator(source=src_lang, target='en')
             search_terms = translator.translate(raw_search)
         except Exception:
-            pass # Fallback to original text if translation fails
+            try:
+                # Attempt 2: Backup Translator if Google blocks Streamlit's IP
+                translator = MyMemoryTranslator(source=src_lang, target='en')
+                search_terms = translator.translate(raw_search)
+            except Exception:
+                st.warning("⚠️ Background translation temporarily blocked by translation servers. Live search is using original text.")
 
     with st.spinner("Translating query and searching global wire services..."):
         articles = fetch_live_news(search_terms, check_today=is_today_query)
