@@ -104,23 +104,18 @@ with st.sidebar:
     st.divider()
     st.caption("Designed for Academic Research & Live Event Verification")
 
-# Load models
+# ==========================================
+# LAZY MODEL LOADER (Fixes Memory Crash)
+# ==========================================
 @st.cache_resource
-def load_artifacts():
-    def load_lang(prefix):
-        try:
-            return (joblib.load(f'{prefix}_tfidf_vectorizer.pkl'),
-                    joblib.load(f'{prefix}_model.pkl'),
-                    joblib.load(f'{prefix}_metrics.pkl'))
-        except Exception:
-            return None
-    return load_lang('english'), load_lang('hindi'), load_lang('marathi')
-
-en_bundle, hi_bundle, mr_bundle = load_artifacts()
-
-if en_bundle is None or hi_bundle is None:
-    st.error("Model artifacts missing. Please ensure `.pkl` files reside in your workspace.")
-    st.stop()
+def load_model(language):
+    try:
+        vec = joblib.load(f'{language}_tfidf_vectorizer.pkl')
+        mod = joblib.load(f'{language}_model.pkl')
+        met = joblib.load(f'{language}_metrics.pkl')
+        return vec, mod, met
+    except Exception as e:
+        return None
 
 # Preprocessing routines
 def preprocess_english(text):
@@ -128,7 +123,6 @@ def preprocess_english(text):
     return " ".join([stemmer.stem(w) for w in text.split() if w not in stop_words_en])
 
 def preprocess_indic(text):
-    # Works for both Hindi and Marathi
     text = re.sub(r'[^\u0900-\u097F\s]', '', str(text))
     return " ".join(text.split())
 
@@ -171,22 +165,28 @@ if analyze_btn:
     is_hindi = detected_lang == "hi"
     is_marathi = detected_lang == "mr"
     
-    # Routing
+    # Routing & Lazy Loading
     if is_marathi:
-        if mr_bundle is None:
-            st.error("🚨 Marathi model missing.")
-            st.stop()
-        clean_text = preprocess_indic(user_input)
-        vectorizer, model, metrics = mr_bundle
+        lang_name = 'marathi'
         lang_display = "Marathi (Devanagari)"
-    elif is_hindi:
         clean_text = preprocess_indic(user_input)
-        vectorizer, model, metrics = hi_bundle
+    elif is_hindi:
+        lang_name = 'hindi'
         lang_display = "Hindi (Devanagari)"
+        clean_text = preprocess_indic(user_input)
     else:
-        clean_text = preprocess_english(user_input)
-        vectorizer, model, metrics = en_bundle
+        lang_name = 'english'
         lang_display = "English"
+        clean_text = preprocess_english(user_input)
+
+    with st.spinner(f"Loading {lang_display} AI Model..."):
+        bundle = load_model(lang_name)
+        
+    if bundle is None:
+        st.error(f"🚨 Missing or corrupt `.pkl` files for {lang_display}.")
+        st.stop()
+        
+    vectorizer, model, metrics = bundle
 
     # Prediction
     transformed = vectorizer.transform([clean_text])
