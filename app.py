@@ -205,34 +205,35 @@ if analyze_btn:
         pred = raw_pred
         confidence = probabilities[pred] * 100
 
-    # API Prep
     is_today_query = "today" in user_input.lower() or "आज" in user_input
     
-    ignore_words = {
-        "was", "is", "are", "were", "there", "today", "now", "the", "this", "that", "a", "an", "in", "on", "at", 
-        "for", "to", "of", "did", "have", "has", "recently", "recent", "about", "news", "tell", "me", "what", "why", "how",
-        "में", "है", "और", "की", "गई", "आज", "का",
-        "आहे", "नाही", "आणि", "व", "ते", "हे", "या", "का"
-    }
-    cleaned_words = [re.sub(r'[^a-zA-Z0-9\u0900-\u097F]', '', w) for w in user_input.split()]
-    meaningful_words = [w for w in cleaned_words if w.lower() not in ignore_words and len(w) > 2]
-    
-    raw_search = " ".join(meaningful_words[:4]) if meaningful_words else user_input.strip()
-    
-    # BULLETPROOF TRANSLATION LAYER: Direct API call overriding Mac SSL
-    search_terms = raw_search
+    # 1. TRANSLATION LAYER: Translate the ENTIRE input first
+    translated_full_text = user_input.strip()
     if is_hindi or is_marathi:
         src_lang = 'mr' if is_marathi else 'hi'
         try:
-            url = f"https://api.mymemory.translated.net/get?q={urllib.parse.quote(raw_search)}&langpair={src_lang}|en"
-            # verify=False is the magic command that overrides the Mac SSL block
+            url = f"https://api.mymemory.translated.net/get?q={urllib.parse.quote(user_input)}&langpair={src_lang}|en"
             res = requests.get(url, verify=False, timeout=5).json()
             if res and "responseData" in res and "translatedText" in res["responseData"]:
-                search_terms = res["responseData"]["translatedText"]
-        except Exception as e:
-            st.warning("⚠️ Background translation temporarily blocked by translation servers. Live search is using original text.")
+                translated_full_text = res["responseData"]["translatedText"]
+        except Exception:
+            pass
 
-    with st.spinner("Translating query and searching global wire services..."):
+    # 2. KEYWORD EXTRACTION: Clean the English translation and enforce strict matching
+    ignore_words = {
+        "was", "is", "are", "were", "there", "today", "now", "the", "this", "that", "a", "an", "in", "on", "at", 
+        "for", "to", "of", "did", "have", "has", "recently", "recent", "about", "news", "tell", "me", "what", "why", "how",
+        "do", "you", "know", "with", "all", "types", "just", "according", "forward", "message", "tomorrow", "if", "can", "will", "please", "guys", "omg", "hear", "secret"
+    }
+    
+    cleaned_words = [re.sub(r'[^a-zA-Z0-9]', '', w) for w in translated_full_text.split()]
+    meaningful_words = [w for w in cleaned_words if w.lower() not in ignore_words and len(w) > 2]
+    
+    # Force strict matching for the top 5 keywords using "AND" logic so it rejects irrelevant articles
+    search_terms = " AND ".join(meaningful_words[:5]) if meaningful_words else translated_full_text
+    display_search_terms = " ".join(meaningful_words[:5]) if meaningful_words else translated_full_text
+
+    with st.spinner("Searching global wire services..."):
         articles = fetch_live_news(search_terms, check_today=is_today_query)
 
     # Save to Session State
@@ -244,7 +245,7 @@ if analyze_btn:
     st.session_state.metrics = metrics
     st.session_state.is_today_query = is_today_query
     st.session_state.articles = articles
-    st.session_state.translated_query = search_terms
+    st.session_state.translated_query = display_search_terms
 
 # ==========================================
 # DISPLAY RESULTS
@@ -291,7 +292,7 @@ if st.session_state.analyzed:
             if st.session_state.is_today_query:
                 st.markdown('<div class="alert-box alert-error">❌ <b>No Coverage Found</b><br>No verified publications reported this claim today.</div>', unsafe_allow_html=True)
             else:
-                st.markdown('<div class="alert-box alert-warning">⚠️ <b>No Active Coverage</b><br>No highly relevant mainstream coverage found matching this topic.</div>', unsafe_allow_html=True)
+                st.markdown('<div class="alert-box alert-warning">⚠️ <b>No Active Coverage</b><br>No highly relevant mainstream coverage found matching this strict keyword query.</div>', unsafe_allow_html=True)
         else:
             PAGE_SIZE = 3
             total_pages = (len(articles) - 1) // PAGE_SIZE + 1
@@ -323,14 +324,16 @@ if st.session_state.analyzed:
                         
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Synthesis Verdict Banner
+    # Synthesis Verdict Banner (The 4-Way Matrix)
     st.subheader("🏁 Final Consensus Verdict")
 
-    if articles and len(articles) > 0:
-        st.success("✅ **VERIFIED AUTHENTIC NEWS** — Real-time reporting from credible outlets confirms the event.")
-    elif st.session_state.is_today_query and (articles is None or len(articles) == 0):
-        st.error("🚨 **UNVERIFIED / FABRICATED EVENT** — Claim is phrased as a current event, but no news wire records match.")
-    elif st.session_state.pred == 0:
-        st.error("🚨 **FLAGGED AS FAKE NEWS** — Phrasing aligns heavily with known disinformation patterns.")
-    else:
-        st.info("ℹ️ **UNVERIFIED CONTEXT** — Linguistic patterns match standard news, but external sourcing remains quiet.")
+    has_articles = articles and len(articles) > 0
+
+    if st.session_state.pred == 1 and has_articles:
+        st.success("✅ **VERIFIED AUTHENTIC NEWS** — Authentic phrasing corroborated by live news wire reporting.")
+    elif st.session_state.pred == 0 and not has_articles:
+        st.error("🚨 **CONFIRMED FAKE NEWS** — Phrasing matches disinformation patterns and zero credible news coverage was found.")
+    elif st.session_state.pred == 1 and not has_articles:
+        st.info("ℹ️ **UNVERIFIED EVENT** — The phrasing looks like standard news, but no recent news wire coverage matches this exact claim.")
+    elif st.session_state.pred == 0 and has_articles:
+        st.warning("⚠️ **DISPUTED / CLICKBAIT** — Topic is in the news, but the phrasing is flagged as highly misleading or sensationalized.")
