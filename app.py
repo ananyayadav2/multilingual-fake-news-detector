@@ -224,7 +224,7 @@ if analyze_btn:
         "was", "is", "are", "were", "there", "today", "now", "the", "this", "that", "a", "an", "in", "on", "at", 
         "for", "to", "of", "did", "have", "has", "recently", "recent", "about", "news", "tell", "me", "what", "why", "how",
         "do", "you", "know", "with", "all", "types", "just", "according", "forward", "message", "tomorrow", "if", "can", "will", "please", "guys", "omg", "hear", "secret",
-        "bad", "good", "due", "because", "very", "much", "too", "so", "and", "or", "but", "really", "does"
+        "bad", "good", "due", "because", "very", "much", "too", "so", "and", "or", "but", "really", "does", "became", "become", "becomes"
     }
     
     cleaned_words = [re.sub(r'[^a-zA-Z0-9]', '', w) for w in translated_full_text.split()]
