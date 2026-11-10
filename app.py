@@ -229,9 +229,9 @@ if analyze_btn:
     cleaned_words = [re.sub(r'[^a-zA-Z0-9]', '', w) for w in translated_full_text.split()]
     meaningful_words = [w for w in cleaned_words if w.lower() not in ignore_words and len(w) > 2]
     
-    # Force strict matching for the top 5 keywords using "AND" logic so it rejects irrelevant articles
-    search_terms = " AND ".join(meaningful_words[:5]) if meaningful_words else translated_full_text
-    display_search_terms = " ".join(meaningful_words[:5]) if meaningful_words else translated_full_text
+   # Force relaxed matching using "OR" logic to catch conversational queries
+    search_terms = " OR ".join(meaningful_words[:5]) if meaningful_words else translated_full_text
+    display_search_terms = " OR ".join(meaningful_words[:5]) if meaningful_words else translated_full_text
 
     with st.spinner("Searching global wire services..."):
         articles = fetch_live_news(search_terms, check_today=is_today_query)
