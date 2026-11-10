@@ -223,15 +223,16 @@ if analyze_btn:
     ignore_words = {
         "was", "is", "are", "were", "there", "today", "now", "the", "this", "that", "a", "an", "in", "on", "at", 
         "for", "to", "of", "did", "have", "has", "recently", "recent", "about", "news", "tell", "me", "what", "why", "how",
-        "do", "you", "know", "with", "all", "types", "just", "according", "forward", "message", "tomorrow", "if", "can", "will", "please", "guys", "omg", "hear", "secret"
+        "do", "you", "know", "with", "all", "types", "just", "according", "forward", "message", "tomorrow", "if", "can", "will", "please", "guys", "omg", "hear", "secret",
+        "bad", "good", "due", "because", "very", "much", "too", "so", "and", "or", "but", "really", "does"
     }
     
     cleaned_words = [re.sub(r'[^a-zA-Z0-9]', '', w) for w in translated_full_text.split()]
     meaningful_words = [w for w in cleaned_words if w.lower() not in ignore_words and len(w) > 2]
     
-   # Force relaxed matching using "OR" logic to catch conversational queries
-    search_terms = " OR ".join(meaningful_words[:5]) if meaningful_words else translated_full_text
-    display_search_terms = " OR ".join(meaningful_words[:5]) if meaningful_words else translated_full_text
+    # Strict "AND" matching, capped at top 4 core nouns to prevent irrelevant articles
+    search_terms = " AND ".join(meaningful_words[:4]) if meaningful_words else translated_full_text
+    display_search_terms = " AND ".join(meaningful_words[:4]) if meaningful_words else translated_full_text
 
     with st.spinner("Searching global wire services..."):
         articles = fetch_live_news(search_terms, check_today=is_today_query)
