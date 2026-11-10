@@ -5,12 +5,21 @@ import nltk
 import requests
 import urllib.parse
 import urllib3
+import ssl
 from datetime import date
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from langdetect import detect, DetectorFactory
 
-# Suppress harmless terminal warnings from our intentional SSL bypass
+# 1. MAC-SPECIFIC FIX: Bypass Python SSL certificate errors for NLTK downloads
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
+
+# Suppress harmless terminal warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Set seed for reproducible language detection
@@ -18,6 +27,8 @@ DetectorFactory.seed = 0
 
 # Setup NLTK resources
 nltk.download('stopwords', quiet=True)
+nltk.download('punkt', quiet=True)
+nltk.download('averaged_perceptron_tagger', quiet=True)
 stemmer = PorterStemmer()
 stop_words_en = set(stopwords.words('english'))
 
@@ -207,7 +218,7 @@ if analyze_btn:
 
     is_today_query = "today" in user_input.lower() or "आज" in user_input
     
-    # 1. TRANSLATION LAYER: Translate the ENTIRE input first
+    # 1. TRANSLATION LAYER
     translated_full_text = user_input.strip()
     if is_hindi or is_marathi:
         src_lang = 'mr' if is_marathi else 'hi'
@@ -218,21 +229,28 @@ if analyze_btn:
                 translated_full_text = res["responseData"]["translatedText"]
         except Exception:
             pass
+        # Strip possessive 's' before keyword extraction to prevent regex from merging it
+    translated_full_text = translated_full_text.replace("'s", "").replace("’s", "")
 
-    # 2. KEYWORD EXTRACTION: Clean the English translation and enforce strict matching
-    ignore_words = {
-        "was", "is", "are", "were", "there", "today", "now", "the", "this", "that", "a", "an", "in", "on", "at", 
-        "for", "to", "of", "did", "have", "has", "recently", "recent", "about", "news", "tell", "me", "what", "why", "how",
-        "do", "you", "know", "with", "all", "types", "just", "according", "forward", "message", "tomorrow", "if", "can", "will", "please", "guys", "omg", "hear", "secret",
-        "bad", "good", "due", "because", "very", "much", "too", "so", "and", "or", "but", "really", "does", "became", "become", "becomes"
-    }
+    # 2. ROBUST KEYWORD EXTRACTION (Double-layered Mac protection)
+    try:
+        tokens = nltk.word_tokenize(translated_full_text)
+        tagged = nltk.pos_tag(tokens)
+        core_entities = [word for word, pos in tagged if pos.startswith('NN')]
+        cleaned_entities = [re.sub(r'[^a-zA-Z0-9]', '', w) for w in core_entities]
+        meaningful_entities = [w for w in cleaned_entities if len(w) > 2]
+        unique_entities = list(dict.fromkeys(meaningful_entities))
+        search_terms = " AND ".join(unique_entities[:4]) if unique_entities else translated_full_text
+        display_search_terms = " AND ".join(unique_entities[:4]) if unique_entities else translated_full_text
     
-    cleaned_words = [re.sub(r'[^a-zA-Z0-9]', '', w) for w in translated_full_text.split()]
-    meaningful_words = [w for w in cleaned_words if w.lower() not in ignore_words and len(w) > 2]
-    
-    # Strict "AND" matching, capped at top 4 core nouns to prevent irrelevant articles
-    search_terms = " AND ".join(meaningful_words[:4]) if meaningful_words else translated_full_text
-    display_search_terms = " AND ".join(meaningful_words[:4]) if meaningful_words else translated_full_text
+    except Exception as e:
+        # Bulletproof Pure-Python Fallback (Never searches full sentence)
+        ignore_words = {"was", "is", "are", "were", "there", "today", "now", "the", "this", "that", "a", "an", "in", "on", "at", "for", "to", "of", "did", "have", "has", "been", "recently", "recent", "about", "news", "tell", "me", "what", "why", "how", "do", "you", "know", "with", "all", "types", "just", "according", "forward", "message", "tomorrow", "if", "can", "will", "please", "guys", "omg", "hear", "secret", "bad", "good", "due", "because", "very", "much", "too", "so", "and", "or", "but", "really", "does", "became", "become", "becomes", "new", "released"}
+        cleaned = [re.sub(r'[^a-zA-Z0-9]', '', w) for w in translated_full_text.split()]
+        meaningful = [w for w in cleaned if w.lower() not in ignore_words and len(w) > 2]
+        unique_entities = list(dict.fromkeys(meaningful))
+        search_terms = " AND ".join(unique_entities[:4]) if unique_entities else translated_full_text
+        display_search_terms = " AND ".join(unique_entities[:4]) if unique_entities else translated_full_text
 
     with st.spinner("Searching global wire services..."):
         articles = fetch_live_news(search_terms, check_today=is_today_query)
@@ -254,7 +272,6 @@ if analyze_btn:
 if st.session_state.analyzed:
     col1, col2 = st.columns(2)
 
-    # Panel 1: ML Model
     with col1:
         st.markdown(f"""
         <div class="metric-card">
@@ -275,7 +292,6 @@ if st.session_state.analyzed:
         with st.expander("Model Benchmark Metrics"):
             st.json(st.session_state.metrics)
 
-    # Panel 2: Live Fact-Checking
     with col2:
         st.markdown(f"""
         <div class="metric-card">
